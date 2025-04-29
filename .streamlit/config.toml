@@ -1,0 +1,20 @@
+[theme]
+primaryColor = "#3b82f6"
+backgroundColor = "#f3f4f6"
+secondaryBackgroundColor = "#e5e7eb"
+textColor = "#1f2937"
+font = "sans serif"
+
+[browser]
+serverAddress = "localhost"
+gatherUsageStats = false
+
+[runner]
+fastReruns = true
+
+[server]
+enableStaticServing = true
+fileWatcherType = "none"
+headless = true
+enableCORS = false
+enableXsrfProtection = false 

@@ -1,0 +1,29 @@
+# Secrets
+.streamlit/secrets.toml
+
+# Ambiente virtual
+venv/
+env/
+.env/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Arquivos de distribuição
+dist/
+build/
+*.egg-info/
+
+# Streamlit cache
+.streamlit/
+
+# Logs
+*.log
+
+# Ambiente de desenvolvimento
+.idea/
+.vscode/
+.DS_Store 
