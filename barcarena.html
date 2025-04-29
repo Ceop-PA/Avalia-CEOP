@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avaliação de Satisfação - CEOP</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+  <style>
+    :root {
+      --primary-color: #3b82f6;
+      --primary-dark: #2563eb;
+      --secondary-color: #22c55e;
+      --text-color: #1f2937;
+      --light-gray: #f3f4f6;
+      --border-color: #e5e7eb;
+      --danger-color: #ef4444;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    body {
+      background-color: var(--light-gray);
+      color: var(--text-color);
+      line-height: 1.6;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+    }
+    
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    
+    header img {
+      max-width: 200px;
+      margin-bottom: 1rem;
+    }
+    
+    header h1 {
+      color: var(--primary-color);
+      margin-bottom: 0.5rem;
+    }
+    
+    header p {
+      color: #6b7280;
+    }
+    
+    .card {
+      background-color: white;
+      border-radius: 0.5rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      padding: 2rem;
+      margin-bottom: 2rem;
+    }
+    
+    .rating-container {
+      margin-bottom: 2rem;
+    }
+    
+    .rating-label {
+      display: block;
+      margin-bottom: 0.75rem;
+      font-weight: 600;
+      font-size: 1.1rem;
+    }
+    
+    .rating {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .stars {
+      display: flex;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+    
+    .star {
+      font-size: 2rem;
+      cursor: pointer;
+      transition: color 0.2s;
+      color: #d1d5db;
+      user-select: none;
+    }
+    
+    .star:hover, .star.active {
+      color: #fbbf24;
+    }
+    
+    .star-value {
+      margin-left: 1rem;
+      font-size: 1.5rem;
+      font-weight: bold;
+      min-width: 2rem;
+    }
+    
+    .rating-description {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-top: 0.25rem;
+    }
+    
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+    
+    .form-label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+    
+    .form-control {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid var(--border-color);
+      border-radius: 0.375rem;
+      font-size: 1rem;
+    }
+    
+    .form-control:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    }
+    
+    .form-control.error {
+      border-color: var(--danger-color);
+    }
+    
+    textarea {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid var(--border-color);
+      border-radius: 0.375rem;
+      resize: vertical;
+      min-height: 120px;
+      font-size: 1rem;
+      margin-top: 0.5rem;
+    }
+    
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    }
+    
+    .submit-btn {
+      display: block;
+      width: 100%;
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      padding: 0.875rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .submit-btn:hover {
+      background-color: var(--primary-dark);
+    }
+    
+    .submit-btn:disabled {
+      background-color: #9ca3af;
+      cursor: not-allowed;
+    }
+    
+    .error-message {
+      color: var(--danger-color);
+      font-size: 0.875rem;
+      margin-top: 0.5rem;
+      display: none;
+    }
+    
+    .submit-success {
+      display: none;
+      text-align: center;
+      padding: 3rem 1rem;
+    }
+    
+    .success-icon {
+      font-size: 4rem;
+      color: var(--secondary-color);
+      margin-bottom: 1rem;
+    }
+    
+    .loading-spinner {
+      display: inline-block;
+      margin-left: 0.5rem;
+      animation: spin 1s infinite linear;
+    }
+    
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    
+    /* Media queries para dispositivos móveis */
+    @media (max-width: 640px) {
+      .stars {
+        justify-content: center;
+      }
+      
+      .star {
+        font-size: 1.5rem;
+        padding: 0 2px;
+      }
+      
+      .star-value {
+        font-size: 1.2rem;
+        min-width: 1.5rem;
+      }
+      
+      .rating-label {
+        font-size: 1rem;
+      }
+      
+      .container {
+        padding: 1rem 0.75rem;
+      }
+      
+      .card {
+        padding: 1.5rem 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="logo Ceop.jpg" alt="Logo CEOP" />
+      <h1>Pesquisa de Satisfação</h1>
+      <p>Sua opinião é muito importante para continuarmos melhorando nossos serviços.</p>
+    </header>
+    
+    <div id="formContainer" class="card">
+      <form id="satisfactionForm">
+        <div class="form-group">
+          <label for="recepcao" class="form-label">Selecione o setor que deseja avaliar*</label>
+          <select id="recepcao" name="recepcao" class="form-control" required>
+            <option value="">Selecione...</option>
+            <option value="Recepção">Recepção</option>
+            <option value="Orientação cirúrgica">Orientação cirúrgica</option>
+          </select>
+          <div id="recepcaoError" class="error-message">Por favor, selecione um setor.</div>
+        </div>
+
+        <div class="rating-container">
+          <label class="rating-label">Numa escala de 1 a 10, o quanto você avalia o nosso atendimento presencial?</label>
+          <div class="rating">
+            <div class="stars">
+              <span class="star" data-rating-type="atendimento" data-value="1"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="2"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="3"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="4"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="5"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="6"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="7"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="8"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="9"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="atendimento" data-value="10"><i class="fa-solid fa-star"></i></span>
+              <span id="atendimentoValue" class="star-value">0</span>
+            </div>
+            <div class="rating-description">
+              <span>Insatisfeito</span>
+              <span>Muito satisfeito</span>
+            </div>
+          </div>
+          <div id="atendimentoError" class="error-message">Por favor, avalie o atendimento presencial.</div>
+        </div>
+        
+        <div class="rating-container">
+          <label class="rating-label">Numa escala de 1 a 10, o quanto você recomendaria o CEOP para um amigo ou parente?</label>
+          <div class="rating">
+            <div class="stars">
+              <span class="star" data-rating-type="recomendacao" data-value="1"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="2"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="3"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="4"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="5"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="6"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="7"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="8"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="9"><i class="fa-solid fa-star"></i></span>
+              <span class="star" data-rating-type="recomendacao" data-value="10"><i class="fa-solid fa-star"></i></span>
+              <span id="recomendacaoValue" class="star-value">0</span>
+            </div>
+            <div class="rating-description">
+              <span>Não recomendaria</span>
+              <span>Recomendaria fortemente</span>
+            </div>
+          </div>
+          <div id="recomendacaoError" class="error-message">Por favor, avalie o quanto recomendaria o CEOP.</div>
+        </div>
+        
+        <div class="rating-container">
+          <label class="rating-label">Em poucas palavras, descreva o que motivou a sua nota:</label>
+          <textarea id="comentario" name="comentario" placeholder="Seu comentário é muito importante para melhorarmos continuamente..."></textarea>
+        </div>
+        
+        <button type="submit" id="submitBtn" class="submit-btn">
+          Enviar Avaliação
+          <span id="loading" class="loading-spinner" style="display:none;"><i class="fas fa-spinner"></i></span>
+        </button>
+        <div id="formError" class="error-message" style="text-align: center; margin-top: 1rem;">Ocorreu um erro ao enviar sua avaliação. Por favor, tente novamente.</div>
+        
+        <!-- Campos ocultos para envio alternativo -->
+        <input type="hidden" name="atendimentoValue" id="atendimentoHidden">
+        <input type="hidden" name="recomendacaoValue" id="recomendacaoHidden">
+      </form>
+    </div>
+    
+    <div id="successMessage" class="card submit-success">
+      <div class="success-icon">
+        <i class="fa-solid fa-circle-check"></i>
+      </div>
+      <h2>Avaliação enviada com sucesso!</h2>
+      <p>Muito obrigado por dedicar seu tempo para nos avaliar.</p>
+      <p>Sua opinião é fundamental para continuarmos melhorando nossos serviços.</p>
+    </div>
+    
+    <!-- iframe oculto para envio seguro -->
+    <iframe name="hiddenFrame" id="hiddenFrame" style="display:none;"></iframe>
+  </div>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Variáveis para armazenar as avaliações
+      let atendimentoRating = 0;
+      let recomendacaoRating = 0;
+      
+      // Elementos do DOM
+      const stars = document.querySelectorAll('.star');
+      const form = document.getElementById('satisfactionForm');
+      const formContainer = document.getElementById('formContainer');
+      const successMessage = document.getElementById('successMessage');
+      const atendimentoValue = document.getElementById('atendimentoValue');
+      const recomendacaoValue = document.getElementById('recomendacaoValue');
+      const atendimentoError = document.getElementById('atendimentoError');
+      const recomendacaoError = document.getElementById('recomendacaoError');
+      const formError = document.getElementById('formError');
+      const loading = document.getElementById('loading');
+      const submitBtn = document.getElementById('submitBtn');
+      
+      // Campos do formulário
+      const comentario = document.getElementById('comentario');
+      const recepcao = document.getElementById('recepcao');
+      const recepcaoError = document.getElementById('recepcaoError');
+      
+      // Adicionar eventos para as estrelas
+      stars.forEach(star => {
+        star.addEventListener('click', function() {
+          const value = parseInt(this.getAttribute('data-value'));
+          const type = this.getAttribute('data-rating-type');
+          
+          // Atualizar a avaliação correspondente
+          if (type === 'atendimento') {
+            atendimentoRating = value;
+            atendimentoValue.textContent = value;
+            atendimentoError.style.display = 'none';
+          } else if (type === 'recomendacao') {
+            recomendacaoRating = value;
+            recomendacaoValue.textContent = value;
+            recomendacaoError.style.display = 'none';
+          }
+          
+          // Atualizar visuais das estrelas
+          updateStars(type, value);
+        });
+      });
+      
+      // Adicionar eventos de validação para os campos
+      recepcao.addEventListener('change', function() {
+        if (this.value) {
+          recepcaoError.style.display = 'none';
+          this.classList.remove('error');
+        }
+      });
+      
+      // Atualizar visuais das estrelas
+      function updateStars(type, value) {
+        const typeStars = document.querySelectorAll(`.star[data-rating-type="${type}"]`);
+        
+        typeStars.forEach(star => {
+          const starValue = parseInt(star.getAttribute('data-value'));
+          if (starValue <= value) {
+            star.classList.add('active');
+          } else {
+            star.classList.remove('active');
+          }
+        });
+      }
+      
+      // Validar o formulário
+      function validateForm() {
+        let isValid = true;
+        
+        // Validar recepção
+        if (!recepcao.value) {
+          recepcaoError.style.display = 'block';
+          recepcao.classList.add('error');
+          isValid = false;
+        } else {
+          recepcaoError.style.display = 'none';
+          recepcao.classList.remove('error');
+        }
+        
+        // Validar avaliações
+        if (atendimentoRating === 0) {
+          atendimentoError.style.display = 'block';
+          isValid = false;
+        } else {
+          atendimentoError.style.display = 'none';
+        }
+        
+        if (recomendacaoRating === 0) {
+          recomendacaoError.style.display = 'block';
+          isValid = false;
+        } else {
+          recomendacaoError.style.display = 'none';
+        }
+        
+        return isValid;
+      }
+      
+      // Manipular o envio do formulário
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        formError.style.display = 'none';
+        
+        // Validar formulário
+        if (!validateForm()) {
+          return;
+        }
+        
+        // Desabilitar botão e mostrar loader
+        submitBtn.disabled = true;
+        loading.style.display = 'inline-block';
+        
+        // Atualizar campos ocultos
+        document.getElementById('atendimentoHidden').value = atendimentoRating.toString();
+        document.getElementById('recomendacaoHidden').value = recomendacaoRating.toString();
+        
+        // Formar URL com parâmetros
+        let url = 'https://script.google.com/macros/s/AKfycbx6ryqkTcCWS-0I4rfPSofNaF0BlerhKzva9T1XmQ6aHCOiY9VfT6UvqvXbAsD3wC96/exec';
+        url += '?recepcao=' + encodeURIComponent(recepcao.value);
+        url += '&atendimento=' + encodeURIComponent(atendimentoRating.toString());
+        url += '&recomendacao=' + encodeURIComponent(recomendacaoRating.toString());
+        url += '&comentario=' + encodeURIComponent(comentario.value.trim());
+        
+        // Método alternativo de envio usando iframe
+        const hiddenFrame = document.getElementById('hiddenFrame');
+        
+        // Configurar evento para quando o iframe terminar de carregar
+        hiddenFrame.onload = function() {
+          // Mostrar mensagem de sucesso
+          formContainer.style.display = 'none';
+          successMessage.style.display = 'block';
+          
+          // Limpar formulário
+          form.reset();
+          atendimentoRating = 0;
+          recomendacaoRating = 0;
+          atendimentoValue.textContent = '0';
+          recomendacaoValue.textContent = '0';
+          updateStars('atendimento', 0);
+          updateStars('recomendacao', 0);
+          
+          // Reabilitar botão e esconder loader
+          submitBtn.disabled = false;
+          loading.style.display = 'none';
+        };
+        
+        // Enviar solicitação via iframe
+        hiddenFrame.src = url;
+      });
+    });
+  </script>
+</body>
+</html> 
