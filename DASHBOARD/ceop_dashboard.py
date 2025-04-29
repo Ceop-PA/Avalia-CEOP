@@ -9,9 +9,6 @@ from plotly.subplots import make_subplots
 import os
 import sys
 from pathlib import Path
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import json
 
 # Configuração da página - DEVE ser o primeiro comando Streamlit
 st.set_page_config(
@@ -20,66 +17,59 @@ st.set_page_config(
     layout="wide"
 )
 
-# Configuração de caminho quando executado como executável
-def resolve_resource_path(relative_path):
-    """Resolve o caminho de recursos quando executado como executável"""
-    if getattr(sys, 'frozen', False):
-        # Se estiver rodando como executável (compilado)
-        base_path = getattr(sys, '_MEIPASS', Path(sys.executable).parent)
-        return os.path.join(base_path, relative_path)
-    else:
-        # Rodando normalmente como script Python
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
-
-# Função para configurar a conexão com o Google Sheets
-def setup_google_connection():
-    # Configurar as credenciais do Google Sheets
-    scope = ['https://spreadsheets.google.com/feeds',
-             'https://www.googleapis.com/auth/drive']
-    
-    # Tentar obter as credenciais do segredo do Streamlit
-    try:
-        # Obter as credenciais do segredo do Streamlit
-        service_account_info = json.loads(st.secrets["gcp_service_account"])
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(service_account_info, scope)
-        return gspread.authorize(creds)
-    except Exception as e:
-        st.error(f"Erro ao configurar conexão com Google Sheets: {e}")
-        return None
-
 # Função para ler dados do Google Sheets
 @st.cache_data(ttl=30)  # Cache por 30 segundos
-def ler_dados_google_sheets(sheet_url):
+def ler_dados_google_sheets(nome_conexao):
     try:
-        # Configurar conexão
-        client = setup_google_connection()
-        if not client:
-            return pd.DataFrame()
+        # Conexão com o Google Sheets usando experimental_connection
+        conn = st.experimental_connection(nome_conexao, type="gsheets")
         
-        # Abrir a planilha pelo URL
-        sheet = client.open_by_url(sheet_url)
-        worksheet = sheet.get_worksheet(0)  # Primeira aba
-        
-        # Obter todos os dados
-        data = worksheet.get_all_records()
-        
-        # Converter para DataFrame
-        df_original = pd.DataFrame(data)
+        # Leitura da planilha
+        df_original = conn.read()
         
         # Verificar se há dados na planilha
         if df_original.empty:
             st.error("A planilha não contém dados")
             return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
         
+        # Mapear corretamente as colunas conforme a estrutura real da planilha
+        # A: Recepção, B: Timestamp, C: E-mail, D: Atendimento, E: Recomendação, F: Comentário
+        col_recepcao = 0    # Coluna A
+        col_timestamp = 1   # Coluna B
+        col_email = 2       # Coluna C
+        col_atendimento = 3 # Coluna D
+        col_recomendacao = 4 # Coluna E
+        col_comentario = 5   # Coluna F
+        
         # Criar novo DataFrame apenas com as colunas necessárias
         df = pd.DataFrame()
         
-        # Mapear as colunas conforme os nomes reais da planilha
-        df['recepcao'] = df_original.get('Recepção', 'Não informado')
-        df['timestamp'] = df_original.get('Timestamp', pd.NaT)
-        df['atendimento'] = df_original.get('Atendimento', np.nan)
-        df['recomendacao'] = df_original.get('Recomendação', np.nan)
-        df['comentario'] = df_original.get('Comentário', '')
+        if len(df_original.columns) > col_recepcao:
+            df['recepcao'] = df_original.iloc[:, col_recepcao].fillna('Não informado')
+        else:
+            df['recepcao'] = 'Não informado'
+        
+        if len(df_original.columns) > col_timestamp:
+            df['timestamp'] = df_original.iloc[:, col_timestamp]
+        else:
+            df['timestamp'] = pd.NaT
+        
+        # Ignoramos o email, mas podemos incluí-lo se necessário
+        
+        if len(df_original.columns) > col_atendimento:
+            df['atendimento'] = df_original.iloc[:, col_atendimento]
+        else:
+            df['atendimento'] = np.nan
+        
+        if len(df_original.columns) > col_recomendacao:
+            df['recomendacao'] = df_original.iloc[:, col_recomendacao]
+        else:
+            df['recomendacao'] = np.nan
+        
+        if len(df_original.columns) > col_comentario:
+            df['comentario'] = df_original.iloc[:, col_comentario]
+        else:
+            df['comentario'] = ""
         
         # Converter timestamp para datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
@@ -100,6 +90,7 @@ def ler_dados_google_sheets(sheet_url):
         st.error(f"Erro ao ler dados do Google Sheets: {e}")
         # Retornar DataFrame vazio em caso de erro
         return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+
 
 # Função para filtrar dados por período
 def filtrar_por_periodo(df, periodo=None):
@@ -284,9 +275,9 @@ def main():
     # Filtro de filial (antes de carregar os dados)
     st.sidebar.header("Filial")
     filiais = {
-        "CEOP Belém": "https://docs.google.com/spreadsheets/d/1D-rTqEaTIwAR-aBE52CDJVQUXYGoU3VoEXDO1k-oK-8/edit",
-        "CEOP Castanhal": "https://docs.google.com/spreadsheets/d/1mvC7unpB-4oPWxxIJC41b4wvDXNQDKv3NWaTLFUG8mE/edit",
-        "CEOP Barcarena": "https://docs.google.com/spreadsheets/d/1xtb16_q2R-HO8ZVbtBjrWdpjiaYTs8KLKkpFXKvyBy0/edit"
+        "CEOP Belém": "gsheets_belem",
+        "CEOP Castanhal": "gsheets_castanhal",
+        "CEOP Barcarena": "gsheets_barcarena"
     }
     filial_selecionada = st.sidebar.selectbox(
         "Selecione a filial:",
