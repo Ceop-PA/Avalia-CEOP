@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 import os
 import sys
 from pathlib import Path
-from st_gsheets_connection import GSheetsConnection
+from streamlit_gsheets import GSheetsConnection
 
 # Configuração da página - DEVE ser o primeiro comando Streamlit
 st.set_page_config(
@@ -23,7 +23,7 @@ st.set_page_config(
 def ler_dados_google_sheets(nome_conexao):
     try:
         # Conexão com o Google Sheets
-        conn = st.connection(nome_conexao, type=GSheetsConnection)
+        conn = st.experimental_connection(nome_conexao, type=GSheetsConnection)
         
         # Leitura da planilha
         df_original = conn.read()
@@ -92,6 +92,34 @@ def ler_dados_google_sheets(nome_conexao):
         # Retornar DataFrame vazio em caso de erro
         return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
 
+# Função para ler dados do CSV
+@st.cache_data(ttl=30)  # Cache por 30 segundos
+def ler_dados_csv(arquivo):
+    try:
+        # Leitura do CSV
+        df = pd.read_csv(arquivo)
+        
+        # Verificar se há dados
+        if df.empty:
+            st.error("O arquivo não contém dados")
+            return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+        
+        # Converter tipos de dados
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        df['atendimento'] = pd.to_numeric(df['atendimento'], errors='coerce')
+        df['recomendacao'] = pd.to_numeric(df['recomendacao'], errors='coerce')
+        
+        # Adicionar colunas de data
+        df['ano'] = df['timestamp'].dt.year
+        df['mes'] = df['timestamp'].dt.month
+        df['mes_nome'] = df['timestamp'].dt.strftime('%B')
+        df['ano_mes'] = df['timestamp'].dt.strftime('%Y-%m')
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Erro ao ler dados do arquivo CSV: {e}")
+        return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
 
 # Função para filtrar dados por período
 def filtrar_por_periodo(df, periodo=None):
