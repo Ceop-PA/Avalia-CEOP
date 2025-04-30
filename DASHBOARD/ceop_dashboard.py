@@ -20,57 +20,27 @@ st.set_page_config(
 
 # Função para ler dados do Google Sheets
 @st.cache_data(ttl=30)  # Cache por 30 segundos
-def ler_dados_google_sheets(nome_conexao):
+def ler_dados_google_sheets(url):
     try:
         # Conexão com o Google Sheets
-        conn = st.experimental_connection(nome_conexao, type=GSheetsConnection)
+        conn = st.connection("gsheets", type=GSheetsConnection)
         
         # Leitura da planilha
-        df_original = conn.read()
+        df = conn.read(spreadsheet=url)
         
         # Verificar se há dados na planilha
-        if df_original.empty:
+        if df.empty:
             st.error("A planilha não contém dados")
             return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
         
-        # Mapear corretamente as colunas conforme a estrutura real da planilha
-        # A: Recepção, B: Timestamp, C: E-mail, D: Atendimento, E: Recomendação, F: Comentário
-        col_recepcao = 0    # Coluna A
-        col_timestamp = 1   # Coluna B
-        col_email = 2       # Coluna C
-        col_atendimento = 3 # Coluna D
-        col_recomendacao = 4 # Coluna E
-        col_comentario = 5   # Coluna F
-        
-        # Criar novo DataFrame apenas com as colunas necessárias
-        df = pd.DataFrame()
-        
-        if len(df_original.columns) > col_recepcao:
-            df['recepcao'] = df_original.iloc[:, col_recepcao].fillna('Não informado')
-        else:
-            df['recepcao'] = 'Não informado'
-        
-        if len(df_original.columns) > col_timestamp:
-            df['timestamp'] = df_original.iloc[:, col_timestamp]
-        else:
-            df['timestamp'] = pd.NaT
-        
-        # Ignoramos o email, mas podemos incluí-lo se necessário
-        
-        if len(df_original.columns) > col_atendimento:
-            df['atendimento'] = df_original.iloc[:, col_atendimento]
-        else:
-            df['atendimento'] = np.nan
-        
-        if len(df_original.columns) > col_recomendacao:
-            df['recomendacao'] = df_original.iloc[:, col_recomendacao]
-        else:
-            df['recomendacao'] = np.nan
-        
-        if len(df_original.columns) > col_comentario:
-            df['comentario'] = df_original.iloc[:, col_comentario]
-        else:
-            df['comentario'] = ""
+        # Renomear colunas
+        df = df.rename(columns={
+            'Recepção': 'recepcao',
+            'Timestamp': 'timestamp',
+            'Atendimento': 'atendimento',
+            'Recomendação': 'recomendacao',
+            'Comentário': 'comentario'
+        })
         
         # Converter timestamp para datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
@@ -89,7 +59,6 @@ def ler_dados_google_sheets(nome_conexao):
         
     except Exception as e:
         st.error(f"Erro ao ler dados do Google Sheets: {e}")
-        # Retornar DataFrame vazio em caso de erro
         return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
 
 # Função para ler dados do CSV
@@ -304,9 +273,9 @@ def main():
     # Filtro de filial (antes de carregar os dados)
     st.sidebar.header("Filial")
     filiais = {
-        "CEOP Belém": "gsheets_belem",
-        "CEOP Castanhal": "gsheets_castanhal",
-        "CEOP Barcarena": "gsheets_barcarena"
+        "CEOP Belém": st.secrets["connections"]["gsheets_belem"]["spreadsheet"],
+        "CEOP Castanhal": st.secrets["connections"]["gsheets_castanhal"]["spreadsheet"],
+        "CEOP Barcarena": st.secrets["connections"]["gsheets_barcarena"]["spreadsheet"]
     }
     filial_selecionada = st.sidebar.selectbox(
         "Selecione a filial:",
