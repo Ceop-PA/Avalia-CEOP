@@ -22,8 +22,8 @@ st.set_page_config(
 @st.cache_data(ttl=30)  # Cache por 30 segundos
 def ler_dados_google_sheets(url):
     try:
-        # Conexão com o Google Sheets
-        conn = st.connection("gsheets", type=GSheetsConnection)
+        # Conexão com o Google Sheets usando a forma mais simples
+        conn = GSheetsConnection()
         
         # Leitura da planilha
         df = conn.read(spreadsheet=url)
