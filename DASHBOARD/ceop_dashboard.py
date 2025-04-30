@@ -9,7 +9,6 @@ from plotly.subplots import make_subplots
 import os
 import sys
 from pathlib import Path
-from streamlit_gsheets import GSheetsConnection
 import requests
 from io import StringIO
 
