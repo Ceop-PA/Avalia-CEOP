@@ -2,5 +2,5 @@ streamlit>=1.25.0
 pandas>=1.5.0
 numpy>=1.23.0
 plotly>=5.10.0
-gsheetsdb>=0.1.13.1 
-requests>=2.31.0 
+google-auth>=2.20.0
+streamlit-gsheets>=0.3.2 
