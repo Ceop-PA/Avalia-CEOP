@@ -9,8 +9,6 @@ from plotly.subplots import make_subplots
 import os
 import sys
 from pathlib import Path
-import requests
-from io import StringIO
 
 # Configuração da página - DEVE ser o primeiro comando Streamlit
 st.set_page_config(
@@ -19,34 +17,34 @@ st.set_page_config(
     layout="wide"
 )
 
-# Função para ler dados do Google Sheets como CSV
+# Configuração de caminho quando executado como executável
+def resolve_resource_path(relative_path):
+    """Resolve o caminho de recursos quando executado como executável"""
+    if getattr(sys, 'frozen', False):
+        # Se estiver rodando como executável (compilado)
+        base_path = getattr(sys, '_MEIPASS', Path(sys.executable).parent)
+        return os.path.join(base_path, relative_path)
+    else:
+        # Rodando normalmente como script Python
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+
+# Função para ler dados do Google Sheets
 @st.cache_data(ttl=30)  # Cache por 30 segundos
-def ler_dados_google_sheets(url):
+def ler_dados_google_sheets(sheet_url):
     try:
-        # Converter URL do Google Sheets para URL de exportação CSV
-        sheet_id = url.split('/')[5]
-        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+        # Conexão com o Google Sheets usando st.experimental_connection
+        conn = st.experimental_connection('gsheets', type='gsheets')
         
-        # Fazer o download do CSV
-        response = requests.get(csv_url)
-        response.raise_for_status()  # Verificar se houve erro no download
-        
-        # Converter para DataFrame
-        df = pd.read_csv(StringIO(response.text))
+        # Ler os dados como DataFrame
+        df_original = conn.read(spreadsheet=sheet_url)
         
         # Verificar se há dados na planilha
-        if df.empty:
+        if df_original.empty:
             st.error("A planilha não contém dados")
             return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
         
-        # Renomear colunas
-        df = df.rename(columns={
-            'Recepção': 'recepcao',
-            'Timestamp': 'timestamp',
-            'Atendimento': 'atendimento',
-            'Recomendação': 'recomendacao',
-            'Comentário': 'comentario'
-        })
+        # Criar cópia do DataFrame
+        df = df_original.copy()
         
         # Converter timestamp para datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
@@ -65,35 +63,7 @@ def ler_dados_google_sheets(url):
         
     except Exception as e:
         st.error(f"Erro ao ler dados do Google Sheets: {e}")
-        return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
-
-# Função para ler dados do CSV
-@st.cache_data(ttl=30)  # Cache por 30 segundos
-def ler_dados_csv(arquivo):
-    try:
-        # Leitura do CSV
-        df = pd.read_csv(arquivo)
-        
-        # Verificar se há dados
-        if df.empty:
-            st.error("O arquivo não contém dados")
-            return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
-        
-        # Converter tipos de dados
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-        df['atendimento'] = pd.to_numeric(df['atendimento'], errors='coerce')
-        df['recomendacao'] = pd.to_numeric(df['recomendacao'], errors='coerce')
-        
-        # Adicionar colunas de data
-        df['ano'] = df['timestamp'].dt.year
-        df['mes'] = df['timestamp'].dt.month
-        df['mes_nome'] = df['timestamp'].dt.strftime('%B')
-        df['ano_mes'] = df['timestamp'].dt.strftime('%Y-%m')
-        
-        return df
-        
-    except Exception as e:
-        st.error(f"Erro ao ler dados do arquivo CSV: {e}")
+        # Retornar DataFrame vazio em caso de erro
         return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
 
 # Função para filtrar dados por período
@@ -279,9 +249,9 @@ def main():
     # Filtro de filial (antes de carregar os dados)
     st.sidebar.header("Filial")
     filiais = {
-        "CEOP Belém": st.secrets["connections"]["gsheets_belem"]["spreadsheet"],
-        "CEOP Castanhal": st.secrets["connections"]["gsheets_castanhal"]["spreadsheet"],
-        "CEOP Barcarena": st.secrets["connections"]["gsheets_barcarena"]["spreadsheet"]
+        "CEOP Belém": "https://docs.google.com/spreadsheets/d/URL_PLANILHA_BELEM",
+        "CEOP Castanhal": "https://docs.google.com/spreadsheets/d/URL_PLANILHA_CASTANHAL",
+        "CEOP Barcarena": "https://docs.google.com/spreadsheets/d/URL_PLANILHA_BARCARENA"
     }
     filial_selecionada = st.sidebar.selectbox(
         "Selecione a filial:",
