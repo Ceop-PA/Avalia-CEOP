@@ -13,6 +13,8 @@ import json
 from typing import Optional, Dict, Any
 import base64
 import requests
+import io
+import re
 
 # Verifica se as bibliotecas opcionais estão disponíveis
 try:
@@ -86,20 +88,26 @@ def carregar_configuracao_planilhas():
             "CEOP Belém": {
                 "sheet_id": "",
                 "sheet_name": "",
+                "sheet_url": "",
+                "sheet_gid": 0,
                 "connection_name": "gsheets_belem"
             },
             "CEOP Castanhal": {
                 "sheet_id": "",
                 "sheet_name": "",
+                "sheet_url": "",
+                "sheet_gid": 0,
                 "connection_name": "gsheets_castanhal"
             },
             "CEOP Barcarena": {
                 "sheet_id": "",
                 "sheet_name": "",
+                "sheet_url": "",
+                "sheet_gid": 0,
                 "connection_name": "gsheets_barcarena"
             }
         },
-        "modo_conexao": "file" # Opções: streamlit, gspread, file
+        "modo_conexao": "public" # Opções: streamlit, gspread, file, public
     }
     
     # Verifica se o arquivo existe
@@ -161,6 +169,8 @@ def ler_dados_google_sheets(filial_config: Dict[str, Any]) -> pd.DataFrame:
         return ler_com_gspread(filial_config.get("sheet_id", ""), filial_config.get("sheet_name", ""))
     elif modo_conexao == "file":
         return ler_de_arquivo_local(filial_config.get("connection_name", ""))
+    elif modo_conexao == "public":
+        return ler_sheet_publico(filial_config.get("sheet_url", ""), filial_config.get("sheet_gid", 0))
     else:
         st.error("Método de conexão não disponível ou não configurado corretamente")
         return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
@@ -231,6 +241,75 @@ def ler_de_arquivo_local(nome_filial):
     
     except Exception as e:
         st.error(f"Erro ao ler dados do arquivo local: {e}")
+        return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+
+# Função para extrair ID da planilha a partir da URL
+def extrair_id_sheet_da_url(url):
+    """
+    Extrai o ID da planilha do Google a partir de diferentes formatos de URL.
+    
+    Args:
+        url: URL do Google Sheets
+        
+    Returns:
+        ID da planilha ou None se não encontrado
+    """
+    if not url:
+        return None
+        
+    # Padrões de URL do Google Sheets
+    padroes = [
+        r'https://docs.google.com/spreadsheets/d/([a-zA-Z0-9_-]+)', # URL normal
+        r'https://drive.google.com/open\?id=([a-zA-Z0-9_-]+)',      # URL de compartilhamento do Drive
+        r'https://sheets.google.com/spreadsheets/d/([a-zA-Z0-9_-]+)' # URL alternativo
+    ]
+    
+    for padrao in padroes:
+        match = re.search(padrao, url)
+        if match:
+            return match.group(1)
+            
+    # Se chegou aqui, pode ser que o usuário colou o ID diretamente
+    if re.match(r'^[a-zA-Z0-9_-]+$', url):
+        return url
+        
+    return None
+
+# Método 4: Ler planilha pública diretamente via URL
+def ler_sheet_publico(sheet_url, sheet_gid=0):
+    """
+    Lê uma planilha pública do Google Sheets diretamente pela URL.
+    
+    Args:
+        sheet_url: URL ou ID da planilha
+        sheet_gid: GID da aba específica (0 para primeira aba)
+        
+    Returns:
+        DataFrame com os dados
+    """
+    try:
+        # Extrair ID da planilha se for uma URL
+        sheet_id = extrair_id_sheet_da_url(sheet_url)
+        if not sheet_id:
+            st.error("URL da planilha inválida")
+            return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+        
+        # Construir URL para exportação como CSV
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={sheet_gid}"
+        
+        # Fazer requisição para a URL
+        response = requests.get(csv_url)
+        if response.status_code != 200:
+            st.error(f"Erro ao acessar planilha: {response.status_code}")
+            return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+        
+        # Ler CSV da resposta
+        df_original = pd.read_csv(io.StringIO(response.content.decode('utf-8')))
+        
+        return processar_dataframe(df_original)
+    
+    except Exception as e:
+        st.error(f"Erro ao ler planilha pública: {e}")
         return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
 
 # Função para processar o DataFrame independentemente da origem
@@ -553,6 +632,8 @@ def main():
         modo_texto = "Streamlit Sheets (Online)"
     elif modo_conexao == "gspread":
         modo_texto = "GSpread API (Online)"
+    elif modo_conexao == "public":
+        modo_texto = "Planilhas Públicas (Online)"
     else:
         modo_texto = "Arquivos Locais (Offline)"
     
@@ -959,10 +1040,7 @@ def pagina_configuracao():
     st.markdown("### Modo de Conexão")
     
     # Opções de modo de conexão
-    modos_disponiveis = []
-    
-    # Sempre disponível
-    modos_disponiveis.append("file")
+    modos_disponiveis = ["public", "file"]  # Modos sem dependências externas
     
     # Verificar disponibilidade do Streamlit Sheets
     if STREAMLIT_GSHEETS_AVAILABLE:
@@ -976,10 +1054,11 @@ def pagina_configuracao():
     modos_nomes = {
         "file": "Arquivos Locais (offline)",
         "streamlit": "Streamlit Google Sheets (online)",
-        "gspread": "Google Sheets API (online)"
+        "gspread": "Google Sheets API (online)",
+        "public": "Planilhas Públicas (online, sem autenticação)"
     }
     
-    modo_atual = config.get("modo_conexao", "file")
+    modo_atual = config.get("modo_conexao", "public")
     
     modo_selecionado = st.radio(
         "Selecione o modo de conexão para os dados:",
@@ -1002,7 +1081,83 @@ def pagina_configuracao():
             st.error(f"Erro ao salvar configuração: {e}")
     
     # Configuração específica para cada modo
-    if modo_selecionado == "gspread":
+    if modo_selecionado == "public":
+        st.markdown("### Configuração de Planilhas Públicas")
+        st.info("""
+        Este modo permite acessar planilhas do Google Sheets públicas ou compartilhadas para visualização.
+        A planilha deve estar configurada para 'Qualquer pessoa com o link pode visualizar'.
+        
+        Cole a URL completa da planilha e informe o número da aba (GID), se necessário.
+        """)
+        
+        # Mostrar configuração atual
+        filiais = config.get("filiais", {})
+        
+        for filial, filial_config in filiais.items():
+            st.markdown(f"#### {filial}")
+            
+            # URL da planilha
+            novo_sheet_url = st.text_input(
+                f"URL da planilha para {filial}:",
+                value=filial_config.get("sheet_url", ""),
+                key=f"sheet_url_{filial}",
+                help="Cole a URL completa da planilha do Google Sheets ou apenas o ID"
+            )
+            
+            # GID da aba (avançado)
+            novo_sheet_gid = st.number_input(
+                f"GID da aba para {filial} (0 para primeira aba):",
+                value=int(filial_config.get("sheet_gid", 0)),
+                min_value=0,
+                key=f"sheet_gid_{filial}",
+                help="O GID é o número que identifica cada aba da planilha, visível na URL quando você seleciona uma aba"
+            )
+            
+            # Testar conexão com a planilha
+            if st.button(f"Testar conexão com planilha de {filial}", key=f"test_{filial}"):
+                if not novo_sheet_url:
+                    st.error("Por favor, informe a URL da planilha")
+                else:
+                    with st.spinner("Testando conexão..."):
+                        # Extrair ID da planilha
+                        sheet_id = extrair_id_sheet_da_url(novo_sheet_url)
+                        if not sheet_id:
+                            st.error("URL da planilha inválida")
+                        else:
+                            # Construir URL para exportação como CSV
+                            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={novo_sheet_gid}"
+                            
+                            # Fazer requisição para a URL
+                            try:
+                                response = requests.get(csv_url)
+                                if response.status_code == 200:
+                                    # Tentar ler os dados
+                                    df = pd.read_csv(io.StringIO(response.content.decode('utf-8')))
+                                    st.success(f"Conexão bem-sucedida! A planilha tem {len(df)} linhas e {len(df.columns)} colunas.")
+                                else:
+                                    st.error(f"Erro ao acessar planilha: {response.status_code}")
+                            except Exception as e:
+                                st.error(f"Erro ao testar conexão: {e}")
+            
+            # Atualizar configuração se valores foram alterados
+            if (novo_sheet_url != filial_config.get("sheet_url", "") or 
+                novo_sheet_gid != filial_config.get("sheet_gid", 0)):
+                
+                filial_config["sheet_url"] = novo_sheet_url
+                filial_config["sheet_gid"] = novo_sheet_gid
+                
+                # Salvar a configuração atualizada
+                try:
+                    config_file = os.path.join(dirs["config_dir"], "sheets_config.json")
+                    with open(config_file, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, indent=4, ensure_ascii=False)
+                    st.success(f"Configuração para {filial} atualizada!")
+                except Exception as e:
+                    st.error(f"Erro ao salvar configuração: {e}")
+            
+            st.markdown("---")
+    
+    elif modo_selecionado == "gspread":
         st.markdown("### Configuração do Google Sheets API")
         
         # Verificar se já existe arquivo de credenciais
