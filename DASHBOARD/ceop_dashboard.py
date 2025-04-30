@@ -9,6 +9,7 @@ from plotly.subplots import make_subplots
 import os
 import sys
 from pathlib import Path
+import requests
 
 # Configuração da página - DEVE ser o primeiro comando Streamlit
 st.set_page_config(
@@ -30,13 +31,17 @@ def resolve_resource_path(relative_path):
 
 # Função para ler dados do Google Sheets
 @st.cache_data(ttl=30)  # Cache por 30 segundos
-def ler_dados_google_sheets(sheet_url):
+def ler_dados_google_sheets(sheet_id):
     try:
-        # Conexão com o Google Sheets
-        conn = st.connection('gsheets', type='gsheets')
+        # URL para exportar a planilha como CSV
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+        
+        # Fazer a requisição HTTP
+        response = requests.get(url)
+        response.raise_for_status()  # Levanta exceção para erros HTTP
         
         # Ler os dados como DataFrame
-        df_original = conn.read(spreadsheet=sheet_url)
+        df_original = pd.read_csv(response.content)
         
         # Verificar se há dados na planilha
         if df_original.empty:
@@ -249,9 +254,7 @@ def main():
     # Filtro de filial (antes de carregar os dados)
     st.sidebar.header("Filial")
     filiais = {
-        "CEOP Belém": "https://docs.google.com/spreadsheets/d/URL_PLANILHA_BELEM",
-        "CEOP Castanhal": "https://docs.google.com/spreadsheets/d/URL_PLANILHA_CASTANHAL",
-        "CEOP Barcarena": "https://docs.google.com/spreadsheets/d/URL_PLANILHA_BARCARENA"
+        "CEOP Belém": "2PACX-1vRHJNE78FSlwE9XZKZeddSKsvow-vW1v2CKv4qmyxMTrDqqVxwDi6nqtwfd7UV6x8J16Zusi2ihooGr"
     }
     filial_selecionada = st.sidebar.selectbox(
         "Selecione a filial:",
