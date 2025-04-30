@@ -10,6 +10,8 @@ import os
 import sys
 from pathlib import Path
 from streamlit_gsheets import GSheetsConnection
+import requests
+from io import StringIO
 
 # Configuração da página - DEVE ser o primeiro comando Streamlit
 st.set_page_config(
@@ -18,15 +20,20 @@ st.set_page_config(
     layout="wide"
 )
 
-# Função para ler dados do Google Sheets
+# Função para ler dados do Google Sheets como CSV
 @st.cache_data(ttl=30)  # Cache por 30 segundos
 def ler_dados_google_sheets(url):
     try:
-        # Conexão com o Google Sheets usando a forma mais simples
-        conn = GSheetsConnection()
+        # Converter URL do Google Sheets para URL de exportação CSV
+        sheet_id = url.split('/')[5]
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
         
-        # Leitura da planilha
-        df = conn.read(spreadsheet=url)
+        # Fazer o download do CSV
+        response = requests.get(csv_url)
+        response.raise_for_status()  # Verificar se houve erro no download
+        
+        # Converter para DataFrame
+        df = pd.read_csv(StringIO(response.text))
         
         # Verificar se há dados na planilha
         if df.empty:
