@@ -32,8 +32,8 @@ def resolve_resource_path(relative_path):
 @st.cache_data(ttl=30)  # Cache por 30 segundos
 def ler_dados_google_sheets(sheet_url):
     try:
-        # Conexão com o Google Sheets usando st.experimental_connection
-        conn = st.experimental_connection('gsheets', type='gsheets')
+        # Conexão com o Google Sheets
+        conn = st.connection('gsheets', type='gsheets')
         
         # Ler os dados como DataFrame
         df_original = conn.read(spreadsheet=sheet_url)
