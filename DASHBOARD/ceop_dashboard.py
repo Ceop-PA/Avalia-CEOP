@@ -9,8 +9,27 @@ from plotly.subplots import make_subplots
 import os
 import sys
 from pathlib import Path
-from google.oauth2.service_account import Credentials
-from streamlit_gsheets import GSheetsConnection
+import json
+from typing import Optional, Dict, Any
+import base64
+import requests
+
+# Verifica se as bibliotecas opcionais estão disponíveis
+try:
+    from google.oauth2.service_account import Credentials
+    from google.oauth2 import service_account
+    import gspread
+    from gspread_pandas import Spread
+    from gspread_dataframe import get_as_dataframe
+    GOOGLE_LIBRARIES_AVAILABLE = True
+except ImportError:
+    GOOGLE_LIBRARIES_AVAILABLE = False
+
+try:
+    from streamlit_gsheets import GSheetsConnection
+    STREAMLIT_GSHEETS_AVAILABLE = True
+except ImportError:
+    STREAMLIT_GSHEETS_AVAILABLE = False
 
 # Configuração da página - DEVE ser o primeiro comando Streamlit
 st.set_page_config(
@@ -18,6 +37,31 @@ st.set_page_config(
     page_icon="📊",
     layout="wide"
 )
+
+# Criar pasta para armazenar arquivos temporários e de configuração
+def setup_app_directories():
+    """Configura os diretórios necessários para a aplicação"""
+    # Determina o diretório base
+    if getattr(sys, 'frozen', False):
+        # Se for executável
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        # Se for script
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Cria o diretório de configuração se não existir
+    config_dir = os.path.join(base_dir, "config")
+    os.makedirs(config_dir, exist_ok=True)
+    
+    # Cria o diretório de dados se não existir
+    data_dir = os.path.join(base_dir, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    
+    return {
+        "base_dir": base_dir,
+        "config_dir": config_dir,
+        "data_dir": data_dir
+    }
 
 # Configuração de caminho quando executado como executável
 def resolve_resource_path(relative_path):
@@ -30,9 +74,99 @@ def resolve_resource_path(relative_path):
         # Rodando normalmente como script Python
         return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
-# Função para ler dados do Google Sheets
+# Função para carregar a configuração das planilhas
+def carregar_configuracao_planilhas():
+    """Carrega as configurações das planilhas do arquivo de configuração"""
+    dirs = setup_app_directories()
+    config_file = os.path.join(dirs["config_dir"], "sheets_config.json")
+    
+    # Configuração padrão
+    config_padrao = {
+        "filiais": {
+            "CEOP Belém": {
+                "sheet_id": "",
+                "sheet_name": "",
+                "connection_name": "gsheets_belem"
+            },
+            "CEOP Castanhal": {
+                "sheet_id": "",
+                "sheet_name": "",
+                "connection_name": "gsheets_castanhal"
+            },
+            "CEOP Barcarena": {
+                "sheet_id": "",
+                "sheet_name": "",
+                "connection_name": "gsheets_barcarena"
+            }
+        },
+        "modo_conexao": "file" # Opções: streamlit, gspread, file
+    }
+    
+    # Verifica se o arquivo existe
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            return config
+        except Exception as e:
+            st.sidebar.error(f"Erro ao carregar configuração: {e}")
+            # Usa a configuração padrão
+            return config_padrao
+    else:
+        # Cria o arquivo de configuração padrão
+        try:
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(config_padrao, f, indent=4, ensure_ascii=False)
+            return config_padrao
+        except Exception as e:
+            st.sidebar.error(f"Erro ao criar arquivo de configuração: {e}")
+            return config_padrao
+
+# Função para carregar configuração do Google Service Account
+def carregar_service_account():
+    """Carrega as credenciais do Google Service Account"""
+    dirs = setup_app_directories()
+    creds_file = os.path.join(dirs["config_dir"], "credentials.json")
+    
+    if os.path.exists(creds_file):
+        try:
+            with open(creds_file, 'r') as f:
+                info = json.load(f)
+            return info
+        except Exception as e:
+            st.sidebar.error(f"Erro ao carregar credenciais: {e}")
+            return None
+    else:
+        return None
+
+# Função para ler dados do Google Sheets usando diferentes métodos
 @st.cache_data(ttl=30)  # Cache por 30 segundos
-def ler_dados_google_sheets(nome_conexao):
+def ler_dados_google_sheets(filial_config: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Lê dados do Google Sheets usando diferentes métodos.
+    
+    Args:
+        filial_config: Configurações da filial selecionada
+    
+    Returns:
+        DataFrame com os dados da planilha
+    """
+    config = carregar_configuracao_planilhas()
+    modo_conexao = config.get("modo_conexao", "file")
+    
+    # Tenta ler usando o método configurado
+    if modo_conexao == "streamlit" and STREAMLIT_GSHEETS_AVAILABLE:
+        return ler_com_streamlit_gsheets(filial_config.get("connection_name", ""))
+    elif modo_conexao == "gspread" and GOOGLE_LIBRARIES_AVAILABLE:
+        return ler_com_gspread(filial_config.get("sheet_id", ""), filial_config.get("sheet_name", ""))
+    elif modo_conexao == "file":
+        return ler_de_arquivo_local(filial_config.get("connection_name", ""))
+    else:
+        st.error("Método de conexão não disponível ou não configurado corretamente")
+        return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+
+# Método 1: Usando streamlit_gsheets
+def ler_com_streamlit_gsheets(nome_conexao):
     try:
         # Conexão com o Google Sheets
         conn = st.connection(nome_conexao, type=GSheetsConnection)
@@ -40,6 +174,68 @@ def ler_dados_google_sheets(nome_conexao):
         # Leitura da planilha
         df_original = conn.read()
         
+        return processar_dataframe(df_original)
+        
+    except Exception as e:
+        st.error(f"Erro ao ler dados do Google Sheets (Streamlit): {e}")
+        return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+
+# Método 2: Usando gspread diretamente
+def ler_com_gspread(sheet_id, sheet_name):
+    try:
+        # Verifica se as credenciais foram carregadas
+        info_credencial = carregar_service_account()
+        if not info_credencial:
+            st.error("Credenciais do Google não encontradas")
+            return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+        
+        # Configura as credenciais
+        credentials = service_account.Credentials.from_service_account_info(
+            info_credencial,
+            scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        )
+        client = gspread.authorize(credentials)
+        
+        # Abre a planilha
+        sh = client.open_by_key(sheet_id)
+        worksheet = sh.worksheet(sheet_name) if sheet_name else sh.sheet1
+        
+        # Obter todos os valores
+        df_original = pd.DataFrame(worksheet.get_all_records())
+        
+        return processar_dataframe(df_original)
+    
+    except Exception as e:
+        st.error(f"Erro ao ler dados do Google Sheets (gspread): {e}")
+        return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+
+# Método 3: Leitura de arquivo local CSV ou Excel
+def ler_de_arquivo_local(nome_filial):
+    try:
+        dirs = setup_app_directories()
+        data_dir = dirs["data_dir"]
+        
+        # Tenta encontrar arquivos CSV ou Excel na pasta de dados
+        csv_path = os.path.join(data_dir, f"{nome_filial}.csv")
+        excel_path = os.path.join(data_dir, f"{nome_filial}.xlsx")
+        
+        if os.path.exists(csv_path):
+            df_original = pd.read_csv(csv_path)
+        elif os.path.exists(excel_path):
+            df_original = pd.read_excel(excel_path)
+        else:
+            st.warning(f"Arquivo de dados para {nome_filial} não encontrado.")
+            return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+        
+        return processar_dataframe(df_original)
+    
+    except Exception as e:
+        st.error(f"Erro ao ler dados do arquivo local: {e}")
+        return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
+
+# Função para processar o DataFrame independentemente da origem
+def processar_dataframe(df_original):
+    try:
         # Verificar se há dados na planilha
         if df_original.empty:
             st.error("A planilha não contém dados")
@@ -54,35 +250,93 @@ def ler_dados_google_sheets(nome_conexao):
         col_recomendacao = 4 # Coluna E
         col_comentario = 5   # Coluna F
         
-        # Criar novo DataFrame apenas com as colunas necessárias
-        df = pd.DataFrame()
-        
-        if len(df_original.columns) > col_recepcao:
-            df['recepcao'] = df_original.iloc[:, col_recepcao].fillna('Não informado')
+        # Se os dados já vieram com nomes de colunas corretos
+        if isinstance(df_original.columns[0], str):
+            colunas_possiveis = {
+                'recepcao': ['recepcao', 'recepção', 'recepçao', 'recepção'],
+                'timestamp': ['timestamp', 'data', 'data/hora', 'data e hora'],
+                'email': ['email', 'e-mail', 'email', 'e-mail'],
+                'atendimento': ['atendimento', 'nota do atendimento', 'avaliação do atendimento'],
+                'recomendacao': ['recomendacao', 'recomendação', 'nota de recomendação'],
+                'comentario': ['comentario', 'comentário', 'observações', 'observacoes']
+            }
+            
+            # Tentar mapear as colunas por nome
+            cols_mapeadas = {}
+            for col_destino, nomes_possiveis in colunas_possiveis.items():
+                for col_nome in df_original.columns:
+                    if col_nome.lower() in nomes_possiveis:
+                        cols_mapeadas[col_destino] = col_nome
+                        break
+            
+            # Se encontrou todas as colunas principais
+            if 'recepcao' in cols_mapeadas and 'timestamp' in cols_mapeadas and 'atendimento' in cols_mapeadas and 'recomendacao' in cols_mapeadas:
+                df = pd.DataFrame()
+                df['recepcao'] = df_original[cols_mapeadas.get('recepcao')].fillna('Não informado')
+                df['timestamp'] = df_original[cols_mapeadas.get('timestamp')]
+                df['atendimento'] = df_original[cols_mapeadas.get('atendimento')]
+                df['recomendacao'] = df_original[cols_mapeadas.get('recomendacao')]
+                
+                if 'comentario' in cols_mapeadas:
+                    df['comentario'] = df_original[cols_mapeadas.get('comentario')]
+                else:
+                    df['comentario'] = ""
+            else:
+                # Usar o método baseado em posição se não encontrou as colunas por nome
+                df = pd.DataFrame()
+                
+                if len(df_original.columns) > col_recepcao:
+                    df['recepcao'] = df_original.iloc[:, col_recepcao].fillna('Não informado')
+                else:
+                    df['recepcao'] = 'Não informado'
+                
+                if len(df_original.columns) > col_timestamp:
+                    df['timestamp'] = df_original.iloc[:, col_timestamp]
+                else:
+                    df['timestamp'] = pd.NaT
+                
+                if len(df_original.columns) > col_atendimento:
+                    df['atendimento'] = df_original.iloc[:, col_atendimento]
+                else:
+                    df['atendimento'] = np.nan
+                
+                if len(df_original.columns) > col_recomendacao:
+                    df['recomendacao'] = df_original.iloc[:, col_recomendacao]
+                else:
+                    df['recomendacao'] = np.nan
+                
+                if len(df_original.columns) > col_comentario:
+                    df['comentario'] = df_original.iloc[:, col_comentario]
+                else:
+                    df['comentario'] = ""
         else:
-            df['recepcao'] = 'Não informado'
-        
-        if len(df_original.columns) > col_timestamp:
-            df['timestamp'] = df_original.iloc[:, col_timestamp]
-        else:
-            df['timestamp'] = pd.NaT
-        
-        # Ignoramos o email, mas podemos incluí-lo se necessário
-        
-        if len(df_original.columns) > col_atendimento:
-            df['atendimento'] = df_original.iloc[:, col_atendimento]
-        else:
-            df['atendimento'] = np.nan
-        
-        if len(df_original.columns) > col_recomendacao:
-            df['recomendacao'] = df_original.iloc[:, col_recomendacao]
-        else:
-            df['recomendacao'] = np.nan
-        
-        if len(df_original.columns) > col_comentario:
-            df['comentario'] = df_original.iloc[:, col_comentario]
-        else:
-            df['comentario'] = ""
+            # Usar o método original baseado em posição
+            df = pd.DataFrame()
+            
+            if len(df_original.columns) > col_recepcao:
+                df['recepcao'] = df_original.iloc[:, col_recepcao].fillna('Não informado')
+            else:
+                df['recepcao'] = 'Não informado'
+            
+            if len(df_original.columns) > col_timestamp:
+                df['timestamp'] = df_original.iloc[:, col_timestamp]
+            else:
+                df['timestamp'] = pd.NaT
+            
+            if len(df_original.columns) > col_atendimento:
+                df['atendimento'] = df_original.iloc[:, col_atendimento]
+            else:
+                df['atendimento'] = np.nan
+            
+            if len(df_original.columns) > col_recomendacao:
+                df['recomendacao'] = df_original.iloc[:, col_recomendacao]
+            else:
+                df['recomendacao'] = np.nan
+            
+            if len(df_original.columns) > col_comentario:
+                df['comentario'] = df_original.iloc[:, col_comentario]
+            else:
+                df['comentario'] = ""
         
         # Converter timestamp para datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
@@ -100,7 +354,7 @@ def ler_dados_google_sheets(nome_conexao):
         return df
         
     except Exception as e:
-        st.error(f"Erro ao ler dados do Google Sheets: {e}")
+        st.error(f"Erro ao processar dados: {e}")
         # Retornar DataFrame vazio em caso de erro
         return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
 
@@ -284,56 +538,121 @@ def categoria_de_nps(nps):
 
 # Interface principal
 def main():
+    # Inicializa diretorios
+    dirs = setup_app_directories()
+    
+    # Carrega a configuração das planilhas
+    config = carregar_configuracao_planilhas()
+    
+    # Adicionar botão para configuração no sidebar
+    st.sidebar.title("CEOP Dashboard")
+    
+    # Verifica o modo de conexão atual e exibe informação
+    modo_conexao = config.get("modo_conexao", "file")
+    if modo_conexao == "streamlit":
+        modo_texto = "Streamlit Sheets (Online)"
+    elif modo_conexao == "gspread":
+        modo_texto = "GSpread API (Online)"
+    else:
+        modo_texto = "Arquivos Locais (Offline)"
+    
+    st.sidebar.info(f"Modo de conexão: {modo_texto}")
+    
     # Filtro de filial (antes de carregar os dados)
     st.sidebar.header("Filial")
-    filiais = {
-        "CEOP Belém": "gsheets_belem",
-        "CEOP Castanhal": "gsheets_castanhal",
-        "CEOP Barcarena": "gsheets_barcarena"
-    }
+    filiais = config.get("filiais", {})
+    
+    if not filiais:
+        st.error("Nenhuma filial configurada. Verifique o arquivo de configuração.")
+        st.stop()
+    
     filial_selecionada = st.sidebar.selectbox(
         "Selecione a filial:",
         options=list(filiais.keys()),
-        index=0  # Belém por padrão
+        index=0  # Primeira filial por padrão
     )
 
-    # Cabeçalho
+    # Carrega ou baixa logo
+    mostrar_logo = True
     try:
         # Caminho para o logo
-        logo_path = "../logo Ceop.jpg"  # Caminho relativo padrão
-        if getattr(sys, 'frozen', False):
-            # Quando executado como executável
-            logo_path = os.path.join(os.path.dirname(sys.executable), "logo Ceop.jpg")
+        logo_path = os.path.join(dirs["base_dir"], "logo Ceop.jpg")
         
-        header_col1, header_col2 = st.columns([7, 3])
-        
-        with header_col1:
-            st.title(f"Dashboard de Avaliações - {filial_selecionada}")
-            st.markdown("Acompanhamento de avaliações de pacientes")
-        
-        with header_col2:
-            # Tentar exibir o logo, se disponível
+        # Verifica se o logo existe
+        if not os.path.exists(logo_path):
+            # Tenta encontrar em caminhos alternativos
+            alt_path = "../logo Ceop.jpg"
+            if os.path.exists(alt_path):
+                logo_path = alt_path
+            else:
+                mostrar_logo = False
+    except Exception:
+        mostrar_logo = False
+    
+    # Cabeçalho
+    header_col1, header_col2 = st.columns([7, 3])
+    
+    with header_col1:
+        st.title(f"Dashboard de Avaliações - {filial_selecionada}")
+        st.markdown("Acompanhamento de avaliações de pacientes")
+    
+    with header_col2:
+        # Tentar exibir o logo, se disponível
+        if mostrar_logo:
             try:
                 st.image(logo_path, width=150)
             except:
                 st.markdown("##")  # Espaço em branco caso não consiga carregar a imagem
-                
-            if st.button("🔄 Atualizar agora"):
-                st.cache_data.clear()
-                st.rerun()
-    except Exception as e:
-        # Fallback para cabeçalho simples em caso de erro
-        st.title(f"Dashboard de Avaliações - {filial_selecionada}")
-        st.markdown("Acompanhamento de avaliações de pacientes")
+        else:
+            st.markdown("##")  # Espaço em branco caso não tenha logo
+            
         if st.button("🔄 Atualizar agora"):
             st.cache_data.clear()
             st.rerun()
 
+    # Configuração da interface
+    with st.sidebar.expander("⚙️ Configurações do Dashboard"):
+        intervalo_atualizacao = st.selectbox(
+            "Intervalo de atualização:",
+            options=[10, 30, 60, 300, 600],
+            format_func=lambda x: f"{x} segundos" if x < 60 else f"{x // 60} minuto{'s' if x >= 120 else ''}",
+            index=1  # Padrão é 30 segundos
+        )
+        
+        atualizar_automaticamente = st.checkbox("Atualizar dados automaticamente", value=True)
+        
+        st.info("O dashboard será atualizado automaticamente com este intervalo se a opção estiver marcada.")
+        
+        # Botão para salvar dados offline (útil para uso sem conexão)
+        if (modo_conexao == "streamlit" or modo_conexao == "gspread") and st.button("💾 Salvar dados para uso offline"):
+            try:
+                # Obter dados atuais
+                filial_config = filiais.get(filial_selecionada, {})
+                df = ler_dados_google_sheets(filial_config)
+                
+                # Salvar como CSV
+                csv_path = os.path.join(dirs["data_dir"], f"{filial_config.get('connection_name', 'dados')}.csv")
+                df.to_csv(csv_path, index=False)
+                
+                st.success(f"Dados salvos com sucesso em {csv_path}")
+            except Exception as e:
+                st.error(f"Erro ao salvar dados: {e}")
+
     # Carregar dados da filial selecionada
-    df = ler_dados_google_sheets(filiais[filial_selecionada])
+    filial_config = filiais.get(filial_selecionada, {})
+    df = ler_dados_google_sheets(filial_config)
     
     if df.empty:
-        st.warning("Nenhum dado encontrado ou erro na conexão com Google Sheets.")
+        st.warning("Nenhum dado encontrado ou erro na conexão com a fonte de dados.")
+        
+        # Mostrar dicas de solução
+        if modo_conexao == "streamlit":
+            st.info("Verifique se a conexão do Streamlit com o Google Sheets está configurada corretamente.")
+        elif modo_conexao == "gspread":
+            st.info("Verifique se o arquivo de credenciais e os IDs das planilhas estão configurados corretamente.")
+        else:
+            st.info(f"Verifique se existem arquivos CSV ou Excel para esta filial na pasta {dirs['data_dir']}.")
+        
         st.stop()
     
     # Filtro de período
@@ -601,35 +920,332 @@ def main():
         use_container_width=True
     )
     
-    # Configurações
-    with st.expander("⚙️ Configurações"):
-        intervalo_atualizacao = st.selectbox(
-            "Intervalo de atualização:",
-            options=[10, 30, 60, 300],
-            format_func=lambda x: f"{x} segundos" if x < 60 else f"{x // 60} minuto{'s' if x >= 120 else ''}",
-            index=1  # Padrão é 30 segundos
-        )
+    # Sistema de atualização automática mais seguro
+    if atualizar_automaticamente:
+        # Usar um método mais compatível com diferentes ambientes
+        st.markdown("---")
+        atualizacao_info = st.empty()
         
-        atualizar_automaticamente = st.checkbox("Atualizar dados automaticamente", value=True)
+        # Exibir informação sobre a próxima atualização
+        tempo_atual = int(time.time())
+        proxima_atualizacao = tempo_atual + intervalo_atualizacao
         
-        st.info("O dashboard será atualizado automaticamente com este intervalo se a opção estiver marcada.")
-    
-    # Para prevenir loops infinitos quando executado como aplicativo
-    if getattr(sys, 'frozen', False):
-        # Se estiver rodando como aplicativo compilado, use uma abordagem mais segura
-        st.write(f"Próxima atualização automática em {intervalo_atualizacao} segundos")
-        time.sleep(intervalo_atualizacao)
-        st.experimental_rerun()
+        atualizacao_info.info(f"Próxima atualização automática às {time.strftime('%H:%M:%S', time.localtime(proxima_atualizacao))}")
+        
+        # Adicionar script JavaScript para recarregar a página após o intervalo
+        # Isso é mais confiável que usar sleep() que pode bloquear a thread
+        js_code = f"""
+        <script>
+            // Programar recarregamento da página
+            setTimeout(function() {{
+                window.location.reload();
+            }}, {intervalo_atualizacao * 1000});
+        </script>
+        """
+        st.markdown(js_code, unsafe_allow_html=True)
     else:
-        # No ambiente de desenvolvimento, podemos usar o contador original
-        if atualizar_automaticamente:
-            contador = st.empty()
-            for i in range(intervalo_atualizacao, 0, -1):
-                contador.markdown(f"Próxima atualização em: **{i}s**")
-                time.sleep(1)
-            st.rerun()
-        else:
-            st.info("Atualização automática desativada. Clique em 'Atualizar agora' para atualizar os dados.")
+        st.info("Atualização automática desativada. Clique em 'Atualizar agora' para atualizar os dados.")
 
+# Página de configuração para quando o usuário clica em "Configurações" no sidebar
+def pagina_configuracao():
+    st.title("Configurações do Dashboard")
+    
+    # Inicializa diretorios
+    dirs = setup_app_directories()
+    
+    # Carrega a configuração atual
+    config = carregar_configuracao_planilhas()
+    
+    st.markdown("### Modo de Conexão")
+    
+    # Opções de modo de conexão
+    modos_disponiveis = []
+    
+    # Sempre disponível
+    modos_disponiveis.append("file")
+    
+    # Verificar disponibilidade do Streamlit Sheets
+    if STREAMLIT_GSHEETS_AVAILABLE:
+        modos_disponiveis.append("streamlit")
+    
+    # Verificar disponibilidade do GSpread
+    if GOOGLE_LIBRARIES_AVAILABLE:
+        modos_disponiveis.append("gspread")
+    
+    # Mapear para nomes amigáveis
+    modos_nomes = {
+        "file": "Arquivos Locais (offline)",
+        "streamlit": "Streamlit Google Sheets (online)",
+        "gspread": "Google Sheets API (online)"
+    }
+    
+    modo_atual = config.get("modo_conexao", "file")
+    
+    modo_selecionado = st.radio(
+        "Selecione o modo de conexão para os dados:",
+        modos_disponiveis,
+        format_func=lambda x: modos_nomes.get(x, x),
+        index=modos_disponiveis.index(modo_atual) if modo_atual in modos_disponiveis else 0
+    )
+    
+    # Se modo selecionado é diferente do atual, atualizar
+    if modo_selecionado != modo_atual:
+        config["modo_conexao"] = modo_selecionado
+        
+        # Salvar configuração
+        try:
+            config_file = os.path.join(dirs["config_dir"], "sheets_config.json")
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+            st.success(f"Modo de conexão alterado para {modos_nomes[modo_selecionado]}")
+        except Exception as e:
+            st.error(f"Erro ao salvar configuração: {e}")
+    
+    # Configuração específica para cada modo
+    if modo_selecionado == "gspread":
+        st.markdown("### Configuração do Google Sheets API")
+        
+        # Verificar se já existe arquivo de credenciais
+        creds_file = os.path.join(dirs["config_dir"], "credentials.json")
+        creds_existe = os.path.exists(creds_file)
+        
+        if creds_existe:
+            st.success("Arquivo de credenciais encontrado!")
+            st.info("Para atualizar as credenciais, envie um novo arquivo JSON.")
+        
+        uploaded_file = st.file_uploader("Envie o arquivo de credenciais do Google Service Account (JSON):", type=['json'])
+        
+        if uploaded_file is not None:
+            try:
+                # Salvar o arquivo de credenciais
+                with open(creds_file, 'wb') as f:
+                    f.write(uploaded_file.getbuffer())
+                st.success("Arquivo de credenciais salvo com sucesso!")
+            except Exception as e:
+                st.error(f"Erro ao salvar arquivo de credenciais: {e}")
+        
+        # Configuração de planilhas
+        st.markdown("### Configuração das Planilhas")
+        
+        # Mostrar configuração atual
+        filiais = config.get("filiais", {})
+        
+        for filial, filial_config in filiais.items():
+            st.markdown(f"#### {filial}")
+            
+            # ID da planilha
+            novo_sheet_id = st.text_input(
+                f"ID da planilha do Google Sheets para {filial}:",
+                value=filial_config.get("sheet_id", ""),
+                key=f"sheet_id_{filial}"
+            )
+            
+            # Nome da aba
+            novo_sheet_name = st.text_input(
+                f"Nome da aba na planilha para {filial} (deixe em branco para usar a primeira aba):",
+                value=filial_config.get("sheet_name", ""),
+                key=f"sheet_name_{filial}"
+            )
+            
+            # Atualizar configuração se valores foram alterados
+            if (novo_sheet_id != filial_config.get("sheet_id", "") or 
+                novo_sheet_name != filial_config.get("sheet_name", "")):
+                
+                filial_config["sheet_id"] = novo_sheet_id
+                filial_config["sheet_name"] = novo_sheet_name
+                
+                # Salvar a configuração atualizada
+                try:
+                    config_file = os.path.join(dirs["config_dir"], "sheets_config.json")
+                    with open(config_file, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, indent=4, ensure_ascii=False)
+                    st.success(f"Configuração para {filial} atualizada!")
+                except Exception as e:
+                    st.error(f"Erro ao salvar configuração: {e}")
+            
+            st.markdown("---")
+    
+    elif modo_selecionado == "streamlit":
+        st.markdown("### Configuração do Streamlit Google Sheets")
+        st.info("""
+        Para usar o Streamlit Google Sheets, você precisa configurar conexões no Streamlit Cloud.
+        Se estiver executando localmente, consulte a documentação do Streamlit sobre como configurar conexões.
+        
+        [Documentação do Streamlit sobre conexões](https://docs.streamlit.io/library/api-reference/connections)
+        """)
+        
+        # Mostrar configuração atual
+        filiais = config.get("filiais", {})
+        
+        for filial, filial_config in filiais.items():
+            st.markdown(f"#### {filial}")
+            
+            # Nome da conexão
+            novo_conn_name = st.text_input(
+                f"Nome da conexão para {filial}:",
+                value=filial_config.get("connection_name", ""),
+                key=f"conn_name_{filial}"
+            )
+            
+            # Atualizar configuração se valores foram alterados
+            if novo_conn_name != filial_config.get("connection_name", ""):
+                
+                filial_config["connection_name"] = novo_conn_name
+                
+                # Salvar a configuração atualizada
+                try:
+                    config_file = os.path.join(dirs["config_dir"], "sheets_config.json")
+                    with open(config_file, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, indent=4, ensure_ascii=False)
+                    st.success(f"Configuração para {filial} atualizada!")
+                except Exception as e:
+                    st.error(f"Erro ao salvar configuração: {e}")
+            
+            st.markdown("---")
+    
+    elif modo_selecionado == "file":
+        st.markdown("### Configuração de Arquivos Locais")
+        st.info(f"""
+        Os arquivos devem estar no diretório de dados: 
+        {dirs['data_dir']}
+        
+        Os arquivos devem ter o mesmo nome das conexões configuradas, com extensão .csv ou .xlsx
+        """)
+        
+        # Mostrar configuração atual
+        filiais = config.get("filiais", {})
+        
+        for filial, filial_config in filiais.items():
+            st.markdown(f"#### {filial}")
+            
+            # Nome do arquivo
+            nome_arquivo = filial_config.get("connection_name", "")
+            if not nome_arquivo:
+                nome_arquivo = filial.lower().replace(" ", "_")
+            
+            novo_nome_arquivo = st.text_input(
+                f"Nome do arquivo para {filial} (sem extensão):",
+                value=nome_arquivo,
+                key=f"file_name_{filial}"
+            )
+            
+            # Atualizar configuração se valores foram alterados
+            if novo_nome_arquivo != filial_config.get("connection_name", ""):
+                
+                filial_config["connection_name"] = novo_nome_arquivo
+                
+                # Salvar a configuração atualizada
+                try:
+                    config_file = os.path.join(dirs["config_dir"], "sheets_config.json")
+                    with open(config_file, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, indent=4, ensure_ascii=False)
+                    st.success(f"Configuração para {filial} atualizada!")
+                except Exception as e:
+                    st.error(f"Erro ao salvar configuração: {e}")
+            
+            # Verificar se o arquivo existe
+            csv_path = os.path.join(dirs["data_dir"], f"{novo_nome_arquivo}.csv")
+            excel_path = os.path.join(dirs["data_dir"], f"{novo_nome_arquivo}.xlsx")
+            
+            if os.path.exists(csv_path):
+                st.success(f"Arquivo CSV encontrado: {csv_path}")
+            elif os.path.exists(excel_path):
+                st.success(f"Arquivo Excel encontrado: {excel_path}")
+            else:
+                st.warning(f"Nenhum arquivo encontrado para {filial}. Crie um arquivo CSV ou Excel.")
+                
+                # Opção para enviar arquivo
+                uploaded_file = st.file_uploader(
+                    f"Envie um arquivo CSV ou Excel para {filial}:",
+                    type=['csv', 'xlsx'],
+                    key=f"upload_{filial}"
+                )
+                
+                if uploaded_file is not None:
+                    try:
+                        # Determinar extensão
+                        file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+                        if file_ext == '.csv':
+                            save_path = csv_path
+                        else:
+                            save_path = excel_path
+                        
+                        # Salvar o arquivo
+                        with open(save_path, 'wb') as f:
+                            f.write(uploaded_file.getbuffer())
+                        st.success(f"Arquivo salvo com sucesso em {save_path}")
+                    except Exception as e:
+                        st.error(f"Erro ao salvar arquivo: {e}")
+            
+            st.markdown("---")
+    
+    st.markdown("### Gerenciamento de Filiais")
+    
+    # Adicionar nova filial
+    st.markdown("#### Adicionar Nova Filial")
+    nova_filial = st.text_input("Nome da nova filial:")
+    if nova_filial and st.button("Adicionar Filial"):
+        if nova_filial in config.get("filiais", {}):
+            st.error("Esta filial já existe!")
+        else:
+            # Adicionar nova filial à configuração
+            if "filiais" not in config:
+                config["filiais"] = {}
+            
+            # Criar configuração padrão para a nova filial
+            config["filiais"][nova_filial] = {
+                "sheet_id": "",
+                "sheet_name": "",
+                "connection_name": nova_filial.lower().replace(" ", "_")
+            }
+            
+            # Salvar configuração
+            try:
+                config_file = os.path.join(dirs["config_dir"], "sheets_config.json")
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, indent=4, ensure_ascii=False)
+                st.success(f"Filial {nova_filial} adicionada com sucesso!")
+            except Exception as e:
+                st.error(f"Erro ao salvar configuração: {e}")
+    
+    # Remover filial
+    st.markdown("#### Remover Filial")
+    filiais_lista = list(config.get("filiais", {}).keys())
+    if filiais_lista:
+        filial_para_remover = st.selectbox("Selecione a filial para remover:", filiais_lista)
+        if st.button("Remover Filial"):
+            # Remover filial da configuração
+            if filial_para_remover in config.get("filiais", {}):
+                del config["filiais"][filial_para_remover]
+                
+                # Salvar configuração
+                try:
+                    config_file = os.path.join(dirs["config_dir"], "sheets_config.json")
+                    with open(config_file, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, indent=4, ensure_ascii=False)
+                    st.success(f"Filial {filial_para_remover} removida com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro ao salvar configuração: {e}")
+    else:
+        st.info("Nenhuma filial disponível para remover.")
+    
+    # Botão para voltar ao dashboard
+    if st.button("Voltar ao Dashboard"):
+        st.session_state.pagina = "dashboard"
+        st.rerun()
+
+# Ponto de entrada do aplicativo
 if __name__ == "__main__":
-    main()
+    # Verifica se há uma página selecionada na sessão
+    if "pagina" not in st.session_state:
+        st.session_state.pagina = "dashboard"
+    
+    # Botão para alternar para página de configurações
+    if st.sidebar.button("⚙️ Configurar Fontes de Dados"):
+        st.session_state.pagina = "config"
+    
+    # Exibe a página apropriada
+    if st.session_state.pagina == "dashboard":
+        main()
+    elif st.session_state.pagina == "config":
+        pagina_configuracao()
