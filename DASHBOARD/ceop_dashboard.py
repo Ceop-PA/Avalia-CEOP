@@ -9,7 +9,8 @@ from plotly.subplots import make_subplots
 import os
 import sys
 from pathlib import Path
-import requests
+from google.oauth2.service_account import Credentials
+from streamlit_gsheets import GSheetsConnection
 
 # Configuração da página - DEVE ser o primeiro comando Streamlit
 st.set_page_config(
@@ -31,25 +32,57 @@ def resolve_resource_path(relative_path):
 
 # Função para ler dados do Google Sheets
 @st.cache_data(ttl=30)  # Cache por 30 segundos
-def ler_dados_google_sheets(sheet_id):
+def ler_dados_google_sheets(nome_conexao):
     try:
-        # URL para exportar a planilha como CSV
-        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+        # Conexão com o Google Sheets
+        conn = st.connection(nome_conexao, type=GSheetsConnection)
         
-        # Fazer a requisição HTTP
-        response = requests.get(url)
-        response.raise_for_status()  # Levanta exceção para erros HTTP
-        
-        # Ler os dados como DataFrame
-        df_original = pd.read_csv(response.content)
+        # Leitura da planilha
+        df_original = conn.read()
         
         # Verificar se há dados na planilha
         if df_original.empty:
             st.error("A planilha não contém dados")
             return pd.DataFrame(columns=['recepcao', 'timestamp', 'atendimento', 'recomendacao', 'comentario'])
         
-        # Criar cópia do DataFrame
-        df = df_original.copy()
+        # Mapear corretamente as colunas conforme a estrutura real da planilha
+        # A: Recepção, B: Timestamp, C: E-mail, D: Atendimento, E: Recomendação, F: Comentário
+        col_recepcao = 0    # Coluna A
+        col_timestamp = 1   # Coluna B
+        col_email = 2       # Coluna C
+        col_atendimento = 3 # Coluna D
+        col_recomendacao = 4 # Coluna E
+        col_comentario = 5   # Coluna F
+        
+        # Criar novo DataFrame apenas com as colunas necessárias
+        df = pd.DataFrame()
+        
+        if len(df_original.columns) > col_recepcao:
+            df['recepcao'] = df_original.iloc[:, col_recepcao].fillna('Não informado')
+        else:
+            df['recepcao'] = 'Não informado'
+        
+        if len(df_original.columns) > col_timestamp:
+            df['timestamp'] = df_original.iloc[:, col_timestamp]
+        else:
+            df['timestamp'] = pd.NaT
+        
+        # Ignoramos o email, mas podemos incluí-lo se necessário
+        
+        if len(df_original.columns) > col_atendimento:
+            df['atendimento'] = df_original.iloc[:, col_atendimento]
+        else:
+            df['atendimento'] = np.nan
+        
+        if len(df_original.columns) > col_recomendacao:
+            df['recomendacao'] = df_original.iloc[:, col_recomendacao]
+        else:
+            df['recomendacao'] = np.nan
+        
+        if len(df_original.columns) > col_comentario:
+            df['comentario'] = df_original.iloc[:, col_comentario]
+        else:
+            df['comentario'] = ""
         
         # Converter timestamp para datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
@@ -254,7 +287,9 @@ def main():
     # Filtro de filial (antes de carregar os dados)
     st.sidebar.header("Filial")
     filiais = {
-        "CEOP Belém": "2PACX-1vRHJNE78FSlwE9XZKZeddSKsvow-vW1v2CKv4qmyxMTrDqqVxwDi6nqtwfd7UV6x8J16Zusi2ihooGr"
+        "CEOP Belém": "gsheets_belem",
+        "CEOP Castanhal": "gsheets_castanhal",
+        "CEOP Barcarena": "gsheets_barcarena"
     }
     filial_selecionada = st.sidebar.selectbox(
         "Selecione a filial:",
