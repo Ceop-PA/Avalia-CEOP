@@ -9,6 +9,7 @@ from plotly.subplots import make_subplots
 import os
 import sys
 from pathlib import Path
+from st_gsheets_connection import GSheetsConnection
 
 # Configuração da página - DEVE ser o primeiro comando Streamlit
 st.set_page_config(
@@ -22,7 +23,7 @@ st.set_page_config(
 def ler_dados_google_sheets(nome_conexao):
     try:
         # Conexão com o Google Sheets
-        conn = st.connection(nome_conexao, type="gsheets")
+        conn = st.connection(nome_conexao, type=GSheetsConnection)
         
         # Leitura da planilha
         df_original = conn.read()
