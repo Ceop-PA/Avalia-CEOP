@@ -418,7 +418,35 @@ def processar_dataframe(df_original):
                 df['comentario'] = ""
         
         # Converter timestamp para datetime
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        # Primeiro tenta formatos brasileiros (dd/mm/yyyy)
+        try:
+            # Tenta primeiro o formato completo dd/mm/yyyy HH:MM:SS
+            df['timestamp'] = pd.to_datetime(df['timestamp'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+            
+            # Se ainda tem valores NaT, tenta o formato dd/mm/yyyy HH:MM
+            mascara_nat = df['timestamp'].isna()
+            if mascara_nat.any():
+                df.loc[mascara_nat, 'timestamp'] = pd.to_datetime(
+                    df.loc[mascara_nat, 'timestamp'], format='%d/%m/%Y %H:%M', errors='coerce'
+                )
+                
+            # Se ainda tem valores NaT, tenta apenas o formato dd/mm/yyyy
+            mascara_nat = df['timestamp'].isna()
+            if mascara_nat.any():
+                df.loc[mascara_nat, 'timestamp'] = pd.to_datetime(
+                    df.loc[mascara_nat, 'timestamp'], format='%d/%m/%Y', errors='coerce'
+                )
+            
+            # Para valores ainda nulos, tenta o formato automático do pandas
+            mascara_nat = df['timestamp'].isna()
+            if mascara_nat.any():
+                df.loc[mascara_nat, 'timestamp'] = pd.to_datetime(
+                    df.loc[mascara_nat, 'timestamp'], errors='coerce'
+                )
+        except Exception as e:
+            # Em caso de erro, volta para o método padrão
+            st.warning(f"Erro ao processar datas no formato brasileiro: {e}. Tentando formato automático.")
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
         
         # Converter notas para inteiro
         df['atendimento'] = pd.to_numeric(df['atendimento'], errors='coerce')
